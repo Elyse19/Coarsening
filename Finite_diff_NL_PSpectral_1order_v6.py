@@ -22,8 +22,8 @@ from scipy import interpolate
 start = time.time()
 n_c = 0
 
-tmax = 30 #maximum time
-dt = 0.0001 # time step
+tmax = 100 #maximum time
+dt = 5*10**-5 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -34,6 +34,7 @@ eps = 0.01   # Amplitude of the initial random field
 Nexp = 110   # Regularization parameter of the potential. Should be integer
         #A higher value  increases accuracy but makes dynamics less stable
         
+      
 
 Nt = int(round(tmax/float(dt)))  # Number of time points
 t = np.linspace(0,tmax,Nt)
@@ -43,18 +44,31 @@ phi2 = np.linspace(0,Nt*dt,Nt) # second moment of order parameter vs time
 
 xmax = 150
 ymax = 150
-Nx = 400  #number of grid points along x
-Ny = 400   #number of grid points along y. In the present code, Nx should equal Ny
+Nx = 2**10  #number of grid points along x
+Ny = 2**10    #number of grid points along y. In the present code, Nx should equal Ny
 
 x = np.linspace(0,xmax,Nx)
 y = np.linspace(0,ymax,Ny)
-r0 = np.sqrt(x**2 + y**2)
-X, Y = np.meshgrid(x, y, indexing='ij')
 
 dx = x[1] - x[0]
 dy = y[1] - y[0]
 
 
+
+
+sig = 1
+correlation_scale = sig/dx
+print('sigma_pix = ', correlation_scale)
+
+lamb_pref = (eps/(sig*xmax))*np.sqrt(3/np.pi)
+
+print('sigma_phys = ', sig)
+
+
+
+print('dx = ', dx)
+r0 = np.sqrt(x**2 + y**2)
+X, Y = np.meshgrid(x, y, indexing='ij')
 
 kx = ky = np.fft.fftfreq(Nx, d = dx)*2.*np.pi
 Kx, Ky = np.meshgrid(kx, ky, indexing='ij')
@@ -92,14 +106,15 @@ def g_1_avant_moy(phi_loc):
 
 ## Generation of the initial random noise
 
-correlation_scale = 1.5
-xx = np.arange(0,r0[-1]/2,1)
+
+xx = np.arange(0,Nx//2,1)
 
 n_realization = n_c
 
 int_save = int(1/dt)*5
-int_g1_save = int(0.1/dt)
+int_g1_save = int(1/dt)*1
 saving = int(0.1/dt)
+int_phi2_save = int(0.05/dt)
 
 # for n_i in range(n_realization):
 def real(n_i):
@@ -114,8 +129,9 @@ def real(n_i):
     np.random.seed(n_i)
     
     noise = np.random.rand(Nx, Ny)*2 -1
-    noise = eps*gaussian_filter(noise,correlation_scale)
+    noise = lamb_pref*gaussian_filter(noise,correlation_scale, mode = 'wrap',truncate = 8.0)*Nx*2*np.pi*sig**2
     
+    print('var= ',np.var(noise))
     
     ## Definition of initial state
     
@@ -137,14 +153,14 @@ def real(n_i):
     phi2 = [np.var(u_1)]
     
     Cons_N0 = np.sum(u_1)/(Nx)**2
-    print(Cons_N0)
+    print('Cons = ', Cons_N0)
+    Cons_N_list = [Cons_N0]
     
+    path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
+    #path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
     
-    # path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
-    path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
-    
-    name = 'testing'
-    file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={correlation_scale}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}_seed={n_i}_2"
+    name = 'IC_test'
+    file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={correlation_scale}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}_seed={n_i}"
     path_save = path + name + file_name + ".npz"
     
     i = 0
@@ -159,7 +175,6 @@ def real(n_i):
     
     for i in range(Nt):
         t_i = t_i + dt
-        t_data.append(t_i)
         
         if i% int_save == 0:
             print('t = ' + str(round(t_i,3)))
@@ -169,17 +184,20 @@ def real(n_i):
             g1_t_avant = ifftshift(g_1_avant_moy(u_1))
             g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx)
             g1_t_apres = g1_t_prof.profile
-            g1_func = interpolate.interp1d(g1_t_prof.radius,g1_t_apres, fill_value = 'extrapolate')
+            g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate')
             g1_save[k] = g1_func(r0)
             k += 1
         
         # print(i)
         Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0
         # print(Cons_N)
-        phi2.append(np.var(u_1))
+        if i%int_phi2_save == 0:
+            Cons_N_list.append(Cons_N)
+            phi2.append(np.var(u_1))
+            t_data.append(t_i)
         # phi2.append(np.sum(u_1**2)/(Nx**2))   
         if i%saving == 0:
-            np.savez(path_save,u_arr,phi2,g1_save,t_data)
+            np.savez(path_save,u_arr,phi2,g1_save,t_data,Cons_N_list)
             print(i)
         if np.isnan(Cons_N):
             print("nan found")
