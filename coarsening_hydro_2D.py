@@ -22,10 +22,10 @@ from scipy import interpolate
 
 
 
-n_c = 0
+n_c = 8
 
-tmax = 30 # maximum time
-dt = 10**-4 # time step
+tmax = 5 # maximum time
+dt = 5*10**-4 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -101,16 +101,16 @@ def advance_vectorized_step1(u_1_loc):
     D1 = 1
     dt2_prime = 0.5*dt2
     
-    u_1_hat = rfft2(u_1_loc)
+    u_1_hat = rfft2(u_1_loc, workers = n_c)
     
     F = compute_F(u_1_loc)
-    F_hat = rfft2(F)
+    F_hat = rfft2(F, workers = n_c)
     
-    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat)
-    NLpart_hat =  rfft2(NL_part)
+    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
+    NLpart_hat =  rfft2(NL_part, workers = n_c)
     
     u_hat = (D1*u_1_hat + dt2_prime*q_2*NLpart_hat)/(1 + C2*dt2_prime*q_2) 
-    u = irfft2(u_hat)
+    u = irfft2(u_hat, workers = n_c)
     
     return u
 #Function used to calculate the first step of the ode
@@ -119,17 +119,17 @@ def advance_vectorized(u_1_loc, u_2_loc):
     D1 = 2.
     D2 = 1.
     
-    u_1_hat = rfft2(u_1_loc)
-    u_2_hat = rfft2(u_2_loc)
+    u_1_hat = rfft2(u_1_loc, workers = n_c)
+    u_2_hat = rfft2(u_2_loc, workers = n_c)
      
     F = compute_F(u_1_loc)
-    F_hat = rfft2(F)
+    F_hat = rfft2(F, workers = n_c)
     
-    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat)
-    NLpart_hat =  rfft2(NL_part)
+    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
+    NLpart_hat =  rfft2(NL_part, workers = n_c)
     
     u_hat = (D1*u_1_hat - D2*u_2_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2)  
-    u = irfft2(u_hat)
+    u = irfft2(u_hat, workers = n_c)
     
     return u
 #Function used to solve ode
