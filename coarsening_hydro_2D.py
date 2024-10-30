@@ -3,14 +3,13 @@
 """
 Created on Fri Oct  6 15:43:11 2023
 
-@author: Nicolas Cherroret
+@author: egliott
 """
 
 from numba import jit
 import numpy as np
 import scipy
-# from scipy.fft import fft2, ifft2,ifftshift
-from numpy.fft import fft2, ifft2,ifftshift,fftfreq
+from scipy.fft import fft2, ifft2,ifftshift, rfft2,irfft2, rfftfreq, fftfreq
 from netCDF4 import Dataset
 import matplotlib.pyplot as plt
 import time
@@ -20,13 +19,13 @@ from scipy.ndimage import gaussian_filter
 from joblib import Parallel, delayed
 from photutils.profiles import RadialProfile
 from scipy import interpolate
-import pyfftw
+
 
 
 n_c = 0
 
-tmax = 5 # maximum time
-dt = 5*10**-4 # time step
+tmax = 30 # maximum time
+dt = 10**-4 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -69,13 +68,12 @@ lamb_pref = (eps/(sig*xmax))*np.sqrt(3/np.pi)
 
 print('sigma_phys = ', sig)
 
-
-
 print('dx = ', dx)
 r0 = np.sqrt(x**2 + y**2)
 X, Y = np.meshgrid(x, y, indexing='ij')
 
-kx = ky = fftfreq(Nx, d = dx)*2.*np.pi
+kx = fftfreq(Nx, d = dx)*2.*np.pi
+ky = rfftfreq(Nx, d = dx)*2.*np.pi
 Kx, Ky = np.meshgrid(kx, ky, indexing='ij')
 
 q_2 = Kx**2 + Ky**2
@@ -89,115 +87,54 @@ def compute_F(u_1_loc):
     u1_loc_3 = u1_loc_2*u_1_loc
     u1_loc_4 = u1_loc_2**2
     F = (np.pi/2 - u_1_loc - 81*np.pi*u1_loc_2/238 + 367*u1_loc_3/714 + 183*np.pi*u1_loc_4/9520)/(1 - 81*u1_loc_2/119 + 183*u1_loc_4/4760)
-    #Pade approximation for arccos(phi)
     return F
+#Pade approximation for arccos(phi)
+#Acceleration with jit (power calculations)
 
 @jit(nopython=True, parallel=True)
 def sqrt_NL(u_1_loc):
     u1_loc_2 = u_1_loc**2 
     return np.sqrt((1 - u_1_loc**(2 + 2*Nexp))/(1 - u1_loc_2))
-
-# def fftw(data,threads=1):
-#     input_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128')
-#     output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128')
-#     input_array[:] = data
-    
-#     fft2_object = pyfftw.FFTW(input_array,output_array, axes = (0,1), direction = 'FFTW_FORWARD', threads = threads)
-#     fft2_object()
-#     fft_result = output_array.copy()
-#     return fft_result
-
-# def ifftw(data,threads=1):
-#     input_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128')
-#     output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128')
-#     input_array[:] = data
-    
-#     ifft2_object = pyfftw.FFTW(input_array,output_array, axes = (0,1), direction = 'FFTW_BACKWARD', threads = threads)
-#     ifft2_object()
-#     ifft_result = output_array.copy()/np.prod(data.shape)
-#     return ifft_result
-    
+#Sqrt part of the nonlinear part
 
 def advance_vectorized_step1(u_1_loc):
     D1 = 1
     dt2_prime = 0.5*dt2
     
-    u_1_hat = fft2(u_1_loc)
-    
+    u_1_hat = rfft2(u_1_loc)
     
     F = compute_F(u_1_loc)
-    F_hat = fft2(F)
+    F_hat = rfft2(F)
     
-    NL_part = sqrt_NL(u_1_loc)*ifft2(q_2*F_hat)
-    NLpart_hat =  fft2(NL_part)
+    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat)
+    NLpart_hat =  rfft2(NL_part)
+    
     u_hat = (D1*u_1_hat + dt2_prime*q_2*NLpart_hat)/(1 + C2*dt2_prime*q_2) 
-    
-    u = ifft2(u_hat).real
+    u = irfft2(u_hat)
     
     return u
-
-# def advance_vectorized_step1(u_1_loc):
-#     D1 = 1
-#     dt2_prime = 0.5*dt2
-    
-#     u_1_hat = fftw(u_1_loc)
-    
-    
-#     F = compute_F(u_1_loc)
-#     F_hat = fftw(F)
-    
-#     NL_part = sqrt_NL(u_1_loc)*ifftw(q_2*F_hat)
-#     NLpart_hat =  fftw(NL_part)
-#     u_hat = (D1*u_1_hat + dt2_prime*q_2*NLpart_hat)/(1 + C2*dt2_prime*q_2) 
-    
-#     u = ifftw(u_hat).real
-    
-#     return u
+#Function used to calculate the first step of the ode
 
 def advance_vectorized(u_1_loc, u_2_loc):
     D1 = 2.
     D2 = 1.
     
-    u_1_hat = fft2(u_1_loc)
-    u_2_hat = fft2(u_2_loc)
+    u_1_hat = rfft2(u_1_loc)
+    u_2_hat = rfft2(u_2_loc)
      
     F = compute_F(u_1_loc)
-    F_hat = fft2(F)
+    F_hat = rfft2(F)
     
-    NL_part = sqrt_NL(u_1_loc)*ifft2(q_2*F_hat)
-    NLpart_hat =  fft2(NL_part)
+    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat)
+    NLpart_hat =  rfft2(NL_part)
     
-    u_hat = (D1*u_1_hat - D2*u_2_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2) 
-    
-    u = ifft2(u_hat).real
+    u_hat = (D1*u_1_hat - D2*u_2_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2)  
+    u = irfft2(u_hat)
     
     return u
-
-# def advance_vectorized(u_1_loc, u_2_loc):
-#     D1 = 2.
-#     D2 = 1.
-    
-#     u_1_hat = fftw(u_1_loc)
-#     u_2_hat = fftw(u_2_loc)
-     
-#     F = compute_F(u_1_loc)
-#     F_hat = fftw(F)
-    
-#     NL_part = sqrt_NL(u_1_loc)*ifftw(q_2*F_hat)
-#     NLpart_hat =  fftw(NL_part)
-    
-#     u_hat = (D1*u_1_hat - D2*u_2_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2) 
-    
-#     u = ifftw(u_hat).real
-    
-#     return u
-
-
-def g_1_avant_moy(phi_loc):
-    phi_hat = fft2(phi_loc)
-    fourier = phi_hat*np.conjugate(phi_hat)
-    res = ifft2(fourier).real
-    return res
+#Function used to solve ode
+#Takes u(t - dt) and u(t - 2dt) and returns u(t)
+#Pseudo spectral method with an implicit time integration
 
 ## Generation of the initial random noise
 
@@ -239,28 +176,26 @@ u = advance_vectorized_step1(u_1)
 u_2, u_1, u = u_1, u, u_2
 
 u_arr = np.zeros((int(Nt/int_save)+1,Nx,Ny))
-# phi2 = [np.sum(u_1**2)/(Nx**2)]
 phi2 = [np.var(u_1)]
+g1_save = np.zeros((int(Nt/int_g1_save)+1,Nx))
 
 Cons_N0 = np.sum(u_1)/(Nx)**2
 print('Cons = ', Cons_N0)
 Cons_N_list = [Cons_N0]
 
+t_data = []
+
 path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
 #path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
 
-name = 'IC_test'
+name = 'IC_test_opti'
 file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={correlation_scale}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}"
-path_save = path + name + file_name + ".npz"
-# path_save = path + name + ".hdf5"
+# path_save = path + name + file_name + ".npz"
+
 
 
 i = 0
 t_i = 0
-t_data = []
-
-g1_save = np.zeros((int(Nt/int_g1_save)+1,Nx))
-
 
 j = 0
 k = 0
@@ -303,13 +238,13 @@ for i in range(Nt):
         i_save = i//int_phi2_save
         t_arr[i_save] = t_i
         varphi[i_save] = np.var(u_1)
-    # phi2.append(np.sum(u_1**2)/(Nx**2))   
+     
     if i%saving == 0:
         # np.savez(path_save,u_arr,phi2,g1_save,t_data,Cons_N_list)
         # np.savez(path_save,phi2,t_data,Cons_N_list)
         print(i)
     if np.isnan(Cons_N):
-        print("nan found")
+        print("nan found") #Usually this means that the code is unstable, try with smaller timestep
         break
     u = advance_vectorized(u_1, u_2)
     u_2, u_1, u = u_1, u, u_2
