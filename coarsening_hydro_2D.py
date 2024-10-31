@@ -22,10 +22,10 @@ from scipy import interpolate
 
 
 
-n_c = 8
+n_c = 4
 
-tmax = 5 # maximum time
-dt = 5*10**-4 # time step
+tmax = 20 # maximum time
+dt = 10**-3 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -47,8 +47,8 @@ phi2 = np.linspace(0,Nt*dt,Nt) # second moment of order parameter vs time
 
 xmax = 150
 ymax = 150
-Nx = 2**9  #number of grid points along x
-Ny = 2**9   #number of grid points along y. In the present code, Nx should equal Ny
+Nx = 2**8  #number of grid points along x
+Ny = 2**8   #number of grid points along y. In the present code, Nx should equal Ny
 
 x = np.linspace(0,xmax*(1-1/Nx),Nx)
 y = np.linspace(0,ymax*(1-1/Nx),Ny)
@@ -204,7 +204,7 @@ start = time.time()
 
 try: ncfile.close()  # just to be safe, make sure dataset is not already open.
 except: pass
-ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') 
+ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC')
 time_dim = ncfile.createDimension('t_arr', Nt/int_phi2_save)     
 phi2_dim = ncfile.createDimension('varphi', Nt/int_phi2_save)   
 t_arr = ncfile.createVariable('t_arr', np.float32, ('t_arr',))
@@ -242,6 +242,7 @@ for i in range(Nt):
     if i%saving == 0:
         # np.savez(path_save,u_arr,phi2,g1_save,t_data,Cons_N_list)
         # np.savez(path_save,phi2,t_data,Cons_N_list)
+        ncfile.sync()
         print(i)
     if np.isnan(Cons_N):
         print("nan found") #Usually this means that the code is unstable, try with smaller timestep
@@ -249,6 +250,7 @@ for i in range(Nt):
     u = advance_vectorized(u_1, u_2)
     u_2, u_1, u = u_1, u, u_2
 
+ncfile.sync()
 end = time.time()
 print('Time = ' + str(end -start))
 
