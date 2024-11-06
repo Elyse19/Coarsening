@@ -22,10 +22,10 @@ from scipy import interpolate
 
 
 
-n_c = 4
+n_c = 8
 
-tmax = 20 # maximum time
-dt = 10**-3 # time step
+tmax = 30 # maximum time
+dt = 10**-5 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -47,8 +47,8 @@ phi2 = np.linspace(0,Nt*dt,Nt) # second moment of order parameter vs time
 
 xmax = 150
 ymax = 150
-Nx = 2**8  #number of grid points along x
-Ny = 2**8   #number of grid points along y. In the present code, Nx should equal Ny
+Nx = 2048  #number of grid points along x
+Ny = 2048   #number of grid points along y. In the present code, Nx should equal Ny
 
 x = np.linspace(0,xmax*(1-1/Nx),Nx)
 y = np.linspace(0,ymax*(1-1/Nx),Ny)
@@ -190,8 +190,6 @@ path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
 
 name = 'IC_test_opti'
 file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={correlation_scale}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}"
-# path_save = path + name + file_name + ".npz"
-
 
 
 i = 0
@@ -204,12 +202,15 @@ start = time.time()
 
 try: ncfile.close()  # just to be safe, make sure dataset is not already open.
 except: pass
-ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC')
+ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
 time_dim = ncfile.createDimension('t_arr', Nt/int_phi2_save)     
 phi2_dim = ncfile.createDimension('varphi', Nt/int_phi2_save)   
+g1_dim = ncfile.createDimension('g1', (Nt/int_g1_save,Nx))   
+phi_2D = ncfile.createDimension('phi_2D', (Nt/int_save,Nx,Ny) )  
 t_arr = ncfile.createVariable('t_arr', np.float32, ('t_arr',))
 varphi = ncfile.createVariable('varphi', np.float32, ('varphi',))
-
+g1 = ncfile.createVariable('g1',np.float32,('g1',))
+phi_2D = ncfile.createVariable('phi_2D',np.float32,('phi_2D',))
 
 
 for i in range(Nt):
@@ -217,39 +218,34 @@ for i in range(Nt):
     
     if i% int_save == 0:
         print('t = ' + str(round(t_i,3)))
-        u_arr[j] = u_1
+        phi_2D[j] = u_1
         j += 1
-    # if i% int_g1_save == 0:
-    #     g1_t_avant = ifftshift(g_1_avant_moy(u_1))
-    #     g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx)
-    #     g1_t_apres = g1_t_prof.profile
-    #     g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate')
-    #     g1_save[k] = g1_func(r0)
-    #     k += 1
+        
+    if i% int_g1_save == 0:
+        g1_t_avant = ifftshift(g_1_avant_moy(u_1))
+        g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx)
+        g1_t_apres = g1_t_prof.profile
+        g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate')
+        g1[k] = g1_func(r0)
+        k += 1
     
-    # print(i)
-    # Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0
-    # print(Cons_N)
     if i%int_phi2_save == 0:
-        # Cons_N_list.append(Cons_N)
-        # phi2.append(np.var(u_1))
-        # t_data.append(t_i)
         Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0
         i_save = i//int_phi2_save
         t_arr[i_save] = t_i
         varphi[i_save] = np.var(u_1)
      
     if i%saving == 0:
-        # np.savez(path_save,u_arr,phi2,g1_save,t_data,Cons_N_list)
-        # np.savez(path_save,phi2,t_data,Cons_N_list)
         ncfile.sync()
         print(i)
     if np.isnan(Cons_N):
         print("nan found") #Usually this means that the code is unstable, try with smaller timestep
         break
+    
     u = advance_vectorized(u_1, u_2)
     u_2, u_1, u = u_1, u, u_2
-
+    #Advance in ODE
+    
 ncfile.sync()
 end = time.time()
 print('Time = ' + str(end -start))
