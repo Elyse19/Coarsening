@@ -21,7 +21,7 @@ from numba import jit
 n_c = 1
 
 tmax = 30 #maximum time
-dt = 10**-4 # time step
+dt = 10**-5 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -39,9 +39,9 @@ t = np.linspace(0,tmax,Nt)
 phi2 = np.linspace(0,Nt*dt,Nt) # second moment of order parameter vs time
 # phi = np.empty((tmax + 1,Nx,Ny), dtype= np.float32) # registered solution phi(x,y,t) at integer times t
 
-xmax = 150
+xmax = 75
 
-Nx = 800  #number of grid points along x
+Nx = 512  #number of grid points along x
 
 x = np.linspace(0,xmax*(1-1/Nx),Nx)
 
@@ -116,11 +116,10 @@ correlation_scale = sig/dx
 
 n_realization = n_c
 
-int_save = int(1/dt)*10
+u_save = int(1/dt)*10
 int_g1_save = int(0.1/dt)
 int_phi2_save = int(0.05/dt)
-saving = int(100/dt)
-
+int_save = int(1/dt)*10
 
 u = np.zeros((Nx), dtype=np.float64) # solution array
 u_1 = np.zeros((Nx), dtype=np.float64) # solution at t-dt
@@ -142,7 +141,7 @@ def ini_u(seed):
 
 ini = 'speckle'
 
-n_real = 20
+n_real = 24
 
 
 u_arr = np.zeros((int(Nt/int_save)+1,Nx))
@@ -152,7 +151,7 @@ Cons_N0 = np.sum(u_1)/(Nx)**2 #Initial conservation number
 path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening_1D/'
 
 name = 'testing_1d'
-file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}_seed={n_i}"
+file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Imb={imbalance}_Eps={eps}_sig={sig}_C={C2}_Nexp={Nexp}_nreal={n_real}"
 path_save = path + name + file_name + ".npz"
 
 i = 0
@@ -169,6 +168,22 @@ start = time.time()
 
 phi_2 = np.zeros((int(Nt/int_phi2_save) + 1))
 
+try: ncfile.close()  # just to be safe, make sure dataset is not already open.
+except: pass
+ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
+#This saving system has the advantage of not having to rewrite the whole file each time it is updated (time consuming)
+
+time_dim = ncfile.createDimension('t_arr', Nt/int_phi2_save)     
+phi2_dim = ncfile.createDimension('varphi', Nt/int_phi2_save)   
+# g1_dim = ncfile.createDimension('g1', (Nt/int_g1_save,Nx))   
+phi_2D = ncfile.createDimension('phi_2D', (Nt/int_save,Nx) )  
+#Set file dimensions
+t_arr = ncfile.createVariable('t_arr', np.float32, ('t_arr',))
+varphi = ncfile.createVariable('varphi', np.float32, ('varphi',))
+# g1 = ncfile.createVariable('g1',np.float32,('g1',))
+phi_2D = ncfile.createVariable('phi_2D',np.float32,('phi_2D',))
+#Set variables
+
 def real(n_real_i):
     t_i = 0
 
@@ -182,13 +197,13 @@ def real(n_real_i):
     for i in range(Nt):
         t_i = t_i + dt
         
-        # if i% int_save == 0:
-        #     print('t = ' + str(round(t_i,3)))
-        #     u_arr[j] = u_1
-        #     j += 1
+        if i% int_save == 0:
+            print('t = ' + str(round(t_i,3)))
+            phi_2D[j] = u_1
+            j += 1
         # if i% int_g1_save == 0:
         #     g1_t = ifftshift(g_1_avant_moy(u_1))
-        #     # g1_func = interpolate.interp1d(x,g1_t, fill_value = 'extrapolate')
+        #     g1_func = interpolate.interp1d(x,g1_t, fill_value = 'extrapolate')
         #     g1_save[k] = g1_t
         #     k += 1
         if i%int_phi2_save == 0:
@@ -197,13 +212,15 @@ def real(n_real_i):
             # phi2.append(np.sum(u_1**2)/(Nx)) 
             # t_data.append(t_i)
             i_save = i//int_phi2_save
-            phi_2[i_save] += np.var(u_1)/(n_real + 1)
+            varphi[i_save] += np.var(u_1)/(n_real + 1)
             if n_real_i == 0:
-                t_data.append(t_i)
+                # t_data.append(t_i)
+                t_arr[i_save] = t_i
         
         if i%int_save == 0:
             # np.savez(path_save,u_arr,phi2,g1_save,t_data)
-            print(i//int_save)
+            # print(i//int_save)
+            ncfile.sync()
             
         u = advance_vectorized(u_1, u_2)
         u_2, u_1, u = u_1, u, u_2
@@ -213,10 +230,11 @@ for n_r_i in range(n_real):
     real(n_r_i)
         
 # t_data = np.arange(0,Nt,dt)    
-t_data = np.array(t_data)
-np.savez(path_save,u_arr,phi_2,g1_save,t_data)  
+# t_data = np.array(t_data)
+# np.savez(path_save,u_arr,phi_2,g1_save,t_data)  
 
-
+ncfile.sync()
 end = time.time()
 print('Time = ' + str(end -start))
 
+ncfile.close(); print('Dataset is closed!')
