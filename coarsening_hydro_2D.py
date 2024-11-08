@@ -10,6 +10,7 @@ from numba import jit
 import numpy as np
 import scipy
 from scipy.fft import fft2, ifft2,ifftshift, rfft2,irfft2, rfftfreq, fftfreq
+import netCDF4 as nc
 from netCDF4 import Dataset
 import matplotlib.pyplot as plt
 import time
@@ -19,11 +20,12 @@ from scipy.ndimage import gaussian_filter
 from joblib import Parallel, delayed
 from photutils.profiles import RadialProfile
 from scipy import interpolate
-
+import os
+import shutil
 
 n_c = 8 #number of cores for parallelization
 
-tmax = 30 # maximum time
+tmax = 100 # maximum time
 dt = 10**-5 # time step
 dt2 = dt**2
 
@@ -39,10 +41,10 @@ sig = 1 #Physical correlation scale
       
 Nt = int(round(tmax/float(dt)))  # Number of time points
 
-xmax = 150 #Box size along x
-ymax = 150 #Box size along y
-Nx = 2048  #number of grid points along x
-Ny = 2048   #number of grid points along y. In the present code, Nx should equal Ny.
+xmax = 75 #Box size along x
+ymax = 75 #Box size along y
+Nx = 800  #number of grid points along x
+Ny = 800   #number of grid points along y. In the present code, Nx should equal Ny.
 
 x = np.linspace(0,xmax*(1-1/Nx),Nx) #x grid
 y = np.linspace(0,ymax*(1-1/Nx),Ny) #y grid
@@ -130,9 +132,15 @@ def advance_vectorized(u_1_loc, u_2_loc):
 
 xx = np.arange(0,Nx//2,1) #Pixel grid used to calculate g1
 
-int_save = int(1/dt)*5
+def g_1_avant_moy(phi_loc):
+    phi_hat = rfft2(phi_loc)
+    fourier = phi_hat*np.conjugate(phi_hat)
+    res = irfft2(fourier).real
+    return res
+
+int_u_save = int(1/dt)*5
 int_g1_save = int(1/dt)*1
-saving = int(0.1/dt)
+saving = int(1/dt)*5
 int_phi2_save = int(0.05/dt)
 #Choice of when to save certain variables
 
@@ -175,7 +183,7 @@ path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
 
 name = 'IC_test_opti'
 file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={correlation_scale}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}"
-
+file_copy = file_name + '_copy'
 
 i = 0
 t_i = 0
@@ -184,60 +192,75 @@ k = 0
 
 start = time.time()
 
-try: ncfile.close()  # just to be safe, make sure dataset is not already open.
-except: pass
-ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
-#This saving system has the advantage of not having to rewrite the whole file each time it is updated (time consuming)
+try :
+    if os.path.exists(path + name + file_name + '.nc'):
+        os.remove(path + name + file_name + '.nc')
+    with nc.Dataset(path + name + file_name + '.nc', 'w',format = 'NETCDF4_CLASSIC') as ds:
 
-time_dim = ncfile.createDimension('t_arr', Nt/int_phi2_save)     
-phi2_dim = ncfile.createDimension('varphi', Nt/int_phi2_save)   
-g1_dim = ncfile.createDimension('g1', (Nt/int_g1_save,Nx))   
-phi_2D = ncfile.createDimension('phi_2D', (Nt/int_save,Nx,Ny) )  
-#Set file dimensions
-t_arr = ncfile.createVariable('t_arr', np.float32, ('t_arr',))
-varphi = ncfile.createVariable('varphi', np.float32, ('varphi',))
-g1 = ncfile.createVariable('g1',np.float32,('g1',))
-phi_2D = ncfile.createVariable('phi_2D',np.float32,('phi_2D',))
-#Set variables
+# try: ncfile.close()  # just to be safe, make sure dataset is not already open.
+# except: pass
+# ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
+# #This saving system has the advantage of not having to rewrite the whole file each time it is updated (time consuming)
 
-for i in range(Nt):
-    t_i = t_i + dt
-    
-    if i% int_save == 0:
-        print('t = ' + str(round(t_i,3)))
-        phi_2D[j] = u_1 #Save 2D phi
-        j += 1
+        time_dim = ds.createDimension('t_arr', int(Nt/int_phi2_save)+1)     
+        phi2_dim = ds.createDimension('varphi', int(Nt/int_phi2_save)+1)   
+        g1_time_dim = ds.createDimension('g1_time', int(Nt/int_g1_save)+1)   
+        g1_value_dim = ds.createDimension('g1_value', Nx)   
+        phi_time_dim = ds.createDimension('phi_time', int(Nt/int_u_save) + 1 )  
+        phi_x_value_dim = ds.createDimension('phi_x_value', Nx )  
+        phi_y_value_dim = ds.createDimension('phi_y_value', Ny )
         
-    if i% int_g1_save == 0:
-        g1_t_avant = ifftshift(g_1_avant_moy(u_1)) #g1 before radial average
-        g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx) 
-        g1_t_apres = g1_t_prof.profile #g1 after radial average for pixel values of xx
-        g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate') #g1 function for real values
-        g1[k] = g1_func(r0) #Save g1
-        k += 1
-    
-    if i%int_phi2_save == 0:
-        Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0 #Check conservation of N
-        i_save = i//int_phi2_save
-        t_arr[i_save] = t_i #Save time
-        varphi[i_save] = np.var(u_1) #Save <\phi^2>
-     
-    if i%saving == 0:
-        ncfile.sync() #Sync values to nc file
-        print(i)
-        
-    if np.isnan(Cons_N):
-        print("nan found") #Usually this means that the code is unstable, try with smaller timestep
-        break
-    
-    u = advance_vectorized(u_1, u_2)
-    u_2, u_1, u = u_1, u, u_2
-    #Advance in ODE
-    
-ncfile.sync()
+        #Set file dimensions
+        t_arr = ds.createVariable('t_arr', np.float32, ('t_arr',))
+        varphi = ds.createVariable('varphi', np.float32, ('varphi',))
+        g1 = ds.createVariable('g1',np.float32,('g1_time','g1_value'))
+        phi_2D = ds.createVariable('phi_2D',np.float32,('phi_time','phi_x_value','phi_y_value'))
+        #Set variables
+
+        for i in range(Nt):
+            t_i = t_i + dt
+            
+            if i% int_u_save == 0:
+                print('t = ' + str(round(t_i,3)))
+                phi_2D[j] = u_1 #Save 2D phi
+                j += 1
+                
+            if i% int_g1_save == 0:
+                g1_t_avant = ifftshift(g_1_avant_moy(u_1)) #g1 before radial average
+                g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx) 
+                g1_t_apres = g1_t_prof.profile #g1 after radial average for pixel values of xx
+                g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate') #g1 function for real values
+                g1[k] = g1_func(r0) #Save g1
+                k += 1
+            
+            if i%int_phi2_save == 0:
+                Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0 #Check conservation of N
+                i_save = i//int_phi2_save
+                t_arr[i_save] = t_i #Save time
+                varphi[i_save] = np.var(u_1) #Save <\phi^2>
+             
+            if i%saving == 0:
+                ds.sync() #Sync values to nc file
+                print(i)
+                try: 
+                    shutil.copy(path + name + file_name + '.nc', path + name + file_copy + '.nc' )
+                    print('copied')
+                except IOError as e:
+                    print(f'{e}')
+                
+            if np.isnan(Cons_N):
+                print("nan found") #Usually this means that the code is unstable, try with smaller timestep
+                break
+            
+            u = advance_vectorized(u_1, u_2)
+            u_2, u_1, u = u_1, u, u_2
+            #Advance in ODE
+except Exception as e:
+    print('Error',e)          
+
 end = time.time()
 print('Time = ' + str(end -start))
 
-ncfile.close(); print('Dataset is closed!')
+# ncfile.close(); print('Dataset is closed!')
 
 
