@@ -12,16 +12,20 @@ from scipy.fft import rfft, irfft
 import matplotlib.pyplot as plt
 import time
 import scipy.signal
+import netCDF4 as nc
+from netCDF4 import Dataset
 import scipy.integrate as integrate
 from scipy.ndimage import gaussian_filter
 from joblib import Parallel, delayed
 from photutils.profiles import RadialProfile
 from numba import jit
+import shutil
+import os
 
 n_c = 1
 
-tmax = 30 #maximum time
-dt = 10**-5 # time step
+tmax = 100 #maximum time
+dt = 10**-4 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -141,7 +145,7 @@ def ini_u(seed):
 
 ini = 'speckle'
 
-n_real = 24
+n_real = 1
 
 
 u_arr = np.zeros((int(Nt/int_save)+1,Nx))
@@ -152,7 +156,9 @@ path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening_1D/'
 
 name = 'testing_1d'
 file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Imb={imbalance}_Eps={eps}_sig={sig}_C={C2}_Nexp={Nexp}_nreal={n_real}"
-path_save = path + name + file_name + ".npz"
+file_copy = file_name + '_copy'
+file_temp = file_name + '_temp'
+# path_save = path + name + file_name + ".npz"
 
 i = 0
 t_i = 0
@@ -168,73 +174,151 @@ start = time.time()
 
 phi_2 = np.zeros((int(Nt/int_phi2_save) + 1))
 
-try: ncfile.close()  # just to be safe, make sure dataset is not already open.
-except: pass
-ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
-#This saving system has the advantage of not having to rewrite the whole file each time it is updated (time consuming)
+# try: ncfile.close()  # just to be safe, make sure dataset is not already open.
+# except: pass
+# ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
 
-time_dim = ncfile.createDimension('t_arr', Nt/int_phi2_save)     
-phi2_dim = ncfile.createDimension('varphi', Nt/int_phi2_save)   
-# g1_dim = ncfile.createDimension('g1', (Nt/int_g1_save,Nx))   
-phi_2D = ncfile.createDimension('phi_2D', (Nt/int_save,Nx) )  
-#Set file dimensions
-t_arr = ncfile.createVariable('t_arr', np.float32, ('t_arr',))
-varphi = ncfile.createVariable('varphi', np.float32, ('varphi',))
-# g1 = ncfile.createVariable('g1',np.float32,('g1',))
-phi_2D = ncfile.createVariable('phi_2D',np.float32,('phi_2D',))
-#Set variables
 
-def real(n_real_i):
-    t_i = 0
-
-    u_2 = np.zeros((Nx), dtype=np.float64)
-    u_1 = ini_u(n_real_i)
+# def real(n_real_i,t_arr_loc,phi2_loc):
+#     t_i = 0
     
-    u = advance_vectorized_step1(u_1)
-    u_2, u_1, u = u_1, u, u_2
-    # t_i = t_i + dt
+#     u_2 = np.zeros((Nx), dtype=np.float64)
+#     u_1 = ini_u(n_real_i)
     
-    for i in range(Nt):
-        t_i = t_i + dt
+#     u = advance_vectorized_step1(u_1)
+#     u_2, u_1, u = u_1, u, u_2
+#     # t_i = t_i + dt
+#     j = 0
+#     k = 0
+    
+#     for i in range(Nt):
+#         t_i = t_i + dt
         
-        if i% int_save == 0:
-            print('t = ' + str(round(t_i,3)))
-            phi_2D[j] = u_1
-            j += 1
-        # if i% int_g1_save == 0:
-        #     g1_t = ifftshift(g_1_avant_moy(u_1))
-        #     g1_func = interpolate.interp1d(x,g1_t, fill_value = 'extrapolate')
-        #     g1_save[k] = g1_t
-        #     k += 1
-        if i%int_phi2_save == 0:
+#         # if i% u_save == 0:
+#         #     print('t = ' + str(round(t_i,3)))
+#         #     phi_x[j] = u_1
+#         #     j += 1
+#         # if i% int_g1_save == 0:
+#         #     g1_t = ifftshift(g_1_avant_moy(u_1))
+#         #     g1_func = interpolate.interp1d(x,g1_t, fill_value = 'extrapolate')
+#         #     g1[k] = g1_t
+#         #     k += 1
+#         if i%int_phi2_save == 0:
     
-            Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0
-            # phi2.append(np.sum(u_1**2)/(Nx)) 
-            # t_data.append(t_i)
-            i_save = i//int_phi2_save
-            varphi[i_save] += np.var(u_1)/(n_real + 1)
-            if n_real_i == 0:
-                # t_data.append(t_i)
-                t_arr[i_save] = t_i
+#             Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0
+#             # phi2.append(np.sum(u_1**2)/(Nx)) 
+#             # t_data.append(t_i)
+#             i_save = i//int_phi2_save
+#             phi2_loc[i_save] = np.var(u_1)
+#             if n_real_i == 0:
+#                 # t_data.append(t_i)
+#                 t_arr_loc[i_save] = t_i
         
-        if i%int_save == 0:
-            # np.savez(path_save,u_arr,phi2,g1_save,t_data)
-            # print(i//int_save)
-            ncfile.sync()
+#         if i%int_save == 0:
+#             print(i//int_save)
+#         #       # np.savez(path_save,u_arr,phi2,g1_save,t_data)
+#         #       # print(i//int_save)
+#             try: 
+#                 shutil.copy(path + name + file_name + '.nc', path + name + file_copy + '.nc' )
+#                 print('copied')
+#             except IOError as e:
+#                 print(f'{e}')
             
-        u = advance_vectorized(u_1, u_2)
-        u_2, u_1, u = u_1, u, u_2
+#         u = advance_vectorized(u_1, u_2)
+#         u_2, u_1, u = u_1, u, u_2
+
+#This saving system has the advantage of not having to rewrite the whole file each time it is updated (time consuming)
+try :
+    if os.path.exists(path + name + file_name + '.nc'):
+        os.remove(path + name + file_name + '.nc')
+    with nc.Dataset(path + name + file_name + '.nc', 'w',format = 'NETCDF4_CLASSIC') as ds:
+    
+        ds.createDimension('t_arr', int(Nt/int_phi2_save)+1)     
+        ds.createDimension('varphi', int(Nt/int_phi2_save)+1)   
+        # g1_time_dim = ds.createDimension('g1_time', int(Nt/int_g1_save)+1)   
+        # g1_value_dim = ds.createDimension('g1_value', Nx)   
+        # phi_x_time_dim = ds.createDimension('phi_x_time', int(Nt/u_save) + 1 )  
+        # phi_x_value_dim = ds.createDimension('phi_x_value', Nx )  
+        #Set file dimensions
+        t_arr = ds.createVariable('t_arr', np.float32, ('t_arr',))
+        varphi = ds.createVariable('varphi', np.float32, ('varphi',))
+        # g1 = ds.createVariable('g1',np.float32,('g1_time','g1_value'))
+        # phi_x = ds.createVariable('phi_x',np.float32,('phi_x_time','phi_x_value'))
+        #Set variables
         
-for n_r_i in range(n_real):
-    print('real=', n_r_i)
-    real(n_r_i)
+        
+        
+        t_i = 0
+        
+        u_2 = np.zeros((Nx), dtype=np.float64)
+        u_1 = ini_u(0)
+        
+        u = advance_vectorized_step1(u_1)
+        u_2, u_1, u = u_1, u, u_2
+        # t_i = t_i + dt
+        j = 0
+        k = 0
+        
+        for i in range(Nt):
+            t_i = t_i + dt
+        
+            # if i% u_save == 0:
+            #     print('t = ' + str(round(t_i,3)))
+            #     phi_x[j] = u_1
+            #     j += 1
+            # if i% int_g1_save == 0:
+            #     g1_t = ifftshift(g_1_avant_moy(u_1))
+            #     g1_func = interpolate.interp1d(x,g1_t, fill_value = 'extrapolate')
+            #     g1[k] = g1_t
+            #     k += 1
+            if i%int_phi2_save == 0:
+            
+                Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0
+                # phi2.append(np.sum(u_1**2)/(Nx)) 
+                # t_data.append(t_i)
+                i_save = i//int_phi2_save
+                varphi[i_save] = np.var(u_1)
+                t_arr[i_save] = t_i
+                # if n_real_i == 0:
+                #     # t_data.append(t_i)
+                #     t_arr[i_save] = t_i
+            
+            if i%int_save == 0:
+                print(i//int_save)
+            #       # np.savez(path_save,u_arr,phi2,g1_save,t_data)
+            #       # print(i//int_save)
+                ds.sync()
+                try: 
+                    shutil.copy(path + name + file_name + '.nc', path + name + file_copy + '.nc' )
+                    print('copied')
+                except IOError as e:
+                    print(f'{e}')
+                
+            u = advance_vectorized(u_1, u_2)
+            u_2, u_1, u = u_1, u, u_2
+
+       
+                    
+        # for n_r_i in range(n_real):
+        #      print('real=', n_r_i)
+        #      real(n_r_i)
+        # real(0,t_arr,varphi)
+        # ds.sync()
+        # t_arr[:] = np.arange(int(Nt/int_phi2_save)+1)
+        # varphi[:] = np.arange(int(Nt/int_phi2_save)+1)
+        
+    # os.replace(path + name + file_temp + '.nc',path+ name + file_name + '.nc')
+except Exception as e:
+    print('Error',e)
+
+# Parallel(n_jobs=n_real)(delayed (real)(i) for i in range(n_real))
         
 # t_data = np.arange(0,Nt,dt)    
 # t_data = np.array(t_data)
 # np.savez(path_save,u_arr,phi_2,g1_save,t_data)  
 
-ncfile.sync()
-end = time.time()
-print('Time = ' + str(end -start))
+# ncfile.sync()
+# end = time.time()
+# print('Time = ' + str(end -start))
 
-ncfile.close(); print('Dataset is closed!')
+# ds.close(); print('Dataset is closed!')
