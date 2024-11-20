@@ -23,10 +23,10 @@ from scipy import interpolate
 import os
 import shutil
 
-n_c = 8 #number of cores for parallelization
+n_c = 4 #number of cores for parallelization
 
-tmax = 100 # maximum time
-dt = 10**-5 # time step
+tmax = 30 # maximum time
+dt = 10**-4 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -41,10 +41,10 @@ sig = 1 #Physical correlation scale
       
 Nt = int(round(tmax/float(dt)))  # Number of time points
 
-xmax = 75 #Box size along x
-ymax = 75 #Box size along y
-Nx = 800  #number of grid points along x
-Ny = 800   #number of grid points along y. In the present code, Nx should equal Ny.
+xmax = 150 #Box size along x
+ymax = 150 #Box size along y
+Nx = 512  #number of grid points along x
+Ny = 512   #number of grid points along y. In the present code, Nx should equal Ny.
 
 x = np.linspace(0,xmax*(1-1/Nx),Nx) #x grid
 y = np.linspace(0,ymax*(1-1/Nx),Ny) #y grid
@@ -139,7 +139,7 @@ def g_1_avant_moy(phi_loc):
     return res
 
 int_u_save = int(1/dt)*5
-int_g1_save = int(1/dt)*1
+int_g1_save = int(1/dt)*2
 saving = int(1/dt)*5
 int_phi2_save = int(0.05/dt)
 #Choice of when to save certain variables
@@ -209,12 +209,14 @@ try :
         phi_time_dim = ds.createDimension('phi_time', int(Nt/int_u_save) + 1 )  
         phi_x_value_dim = ds.createDimension('phi_x_value', Nx )  
         phi_y_value_dim = ds.createDimension('phi_y_value', Ny )
+       
         
         #Set file dimensions
         t_arr = ds.createVariable('t_arr', np.float32, ('t_arr',))
         varphi = ds.createVariable('varphi', np.float32, ('varphi',))
         g1 = ds.createVariable('g1',np.float32,('g1_time','g1_value'))
         phi_2D = ds.createVariable('phi_2D',np.float32,('phi_time','phi_x_value','phi_y_value'))
+        phi_2D_1 = ds.createVariable('phi_2D_1',np.float32,('phi_time','phi_x_value','phi_y_value'))
         #Set variables
 
         for i in range(Nt):
@@ -223,6 +225,7 @@ try :
             if i% int_u_save == 0:
                 print('t = ' + str(round(t_i,3)))
                 phi_2D[j] = u_1 #Save 2D phi
+                phi_2D_1[j] = u_2 #Save 2D phi before
                 j += 1
                 
             if i% int_g1_save == 0:
