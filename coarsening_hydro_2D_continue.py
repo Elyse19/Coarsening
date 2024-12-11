@@ -138,8 +138,10 @@ def g_1_avant_moy(phi_loc):
     res = irfft2(fourier).real
     return res
 
-int_u_save = int(1/dt)*5
-int_g1_save = int(1/dt)*2
+t_u_save = 5
+t_g1_save = 2
+int_u_save = int(1/dt)*t_u_save
+int_g1_save = int(1/dt)*t_g1_save
 saving = int(1/dt)*5
 int_phi2_save = int(0.05/dt)
 #Choice of when to save certain variables
@@ -160,29 +162,13 @@ noise = lamb_pref*gaussian_filter(noise,correlation_scale, mode = 'wrap',truncat
 
 print('var= ',np.var(noise))
 
-## Definition of initial state
-
-ini = 'speckle'
-# u_1_in = imbalance + noise
-
-
-# u_1 = u_1_in
-
-## Special formula for first time step
-# u = advance_vectorized_step1(u_1)
-# u_2, u_1, u = u_1, u, u_2
-
-
-# Cons_N0 = np.sum(u_1)/(Nx)**2 #Initial conservation number
-# print('Cons = ', Cons_N0)
-
 
 path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
 #path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
 # path = ''
 
-name = 'IC_test_opti'
-file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={3.4133333333333336}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}"
+name = 'Coarsening'
+file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Sig={sig}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}_usave={t_u_save}_g1save={t_g1_save}"
 file_copy = file_name + '_copy'
 
 i = 0
@@ -217,7 +203,7 @@ u_1 = last_phi_2D.data
 
 # print(t_arr_tab)
 
-Cons_N0 = np.sum(u_1)/(Nx)**2 #Initial conservation number
+Cons_N0 = np.sum(phi2D[0])/(Nx)**2 #Initial conservation number
 print('Cons = ', Cons_N0)
 Cons_N = Cons_N0
 #Need to modify this
@@ -228,10 +214,6 @@ try :
         
     with nc.Dataset(path + name + file_name + '_v2' + '.nc', mode = 'w',format = 'NETCDF4_CLASSIC') as ds:
 
-# try: ncfile.close()  # just to be safe, make sure dataset is not already open.
-# except: pass
-# ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
-# #This saving system has the advantage of not having to rewrite the whole file each time it is updated (time consuming)
 
         time_dim = ds.createDimension('t_arr', int(Nt/int_phi2_save)+1)     
         phi2_dim = ds.createDimension('varphi', int(Nt/int_phi2_save)+1)   
@@ -263,6 +245,7 @@ try :
             t_i = t_i + dt
             
             if i% int_u_save == 0:
+                j = i//int_u_save
                 print('t = ' + str(round(t_i,3)))
                 phi_2D[j] = u_1 #Save 2D phi
                 phi_2D_1[j] = u_2
@@ -272,6 +255,7 @@ try :
                 k = i//int_g1_save
                 g1_t_avant = ifftshift(g_1_avant_moy(u_1)) #g1 before radial average
                 g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx) 
+                # g1_t_prof = RadialProfile(g1_t_avant,xycen = (Nx//2,Nx//2),min_radius = 0, max_radius = Nx//2, radius_step = 1) 
                 g1_t_apres = g1_t_prof.profile #g1 after radial average for pixel values of xx
                 g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate') #g1 function for real values
                 g1[k] = g1_func(r0) #Save g1
@@ -282,8 +266,6 @@ try :
                 i_save = i//int_phi2_save
                 t_arr[i_save] = t_i #Save time
                 varphi[i_save] = np.var(u_1) #Save <\phi^2>
-                # print('phi2', varphi[i_save])
-                # print(varphi)
              
             if i%saving == 0:
                 ds.sync() #Sync values to nc file
@@ -308,6 +290,6 @@ except Exception as e:
 end = time.time()
 print('Time = ' + str(end -start))
 
-# ncfile.close(); print('Dataset is closed!')
+
 
 
