@@ -22,11 +22,15 @@ from photutils.profiles import RadialProfile
 from scipy import interpolate
 import os
 import shutil
+from numba import config
 
-n_c = 4 #number of cores for parallelization
 
-tmax = 30 # maximum time
-dt = 10**-4 # time step
+# config.NUMBA_NUM_THREADS = 8  # Use 4 threads
+
+n_c = 10 #number of cores for parallelization
+
+tmax = 50 # maximum time
+dt = 10**-5 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -41,10 +45,10 @@ sig = 1 #Physical correlation scale
       
 Nt = int(round(tmax/float(dt)))  # Number of time points
 
-xmax = 150 #Box size along x
-ymax = 150 #Box size along y
-Nx = 512  #number of grid points along x
-Ny = 512   #number of grid points along y. In the present code, Nx should equal Ny.
+xmax = 75 #Box size along x
+ymax = 75 #Box size along y
+Nx = 800  #number of grid points along x
+Ny = 800   #number of grid points along y. In the present code, Nx should equal Ny.
 
 x = np.linspace(0,xmax*(1-1/Nx),Nx) #x grid
 y = np.linspace(0,ymax*(1-1/Nx),Ny) #y grid
@@ -138,8 +142,10 @@ def g_1_avant_moy(phi_loc):
     res = irfft2(fourier).real
     return res
 
-int_u_save = int(1/dt)*5
-int_g1_save = int(1/dt)*2
+t_u_save = 5
+t_g1_save = 2
+int_u_save = int(1/dt)*t_u_save
+int_g1_save = int(1/dt)*t_g1_save
 saving = int(1/dt)*5
 int_phi2_save = int(0.05/dt)
 #Choice of when to save certain variables
@@ -149,8 +155,8 @@ u_1 = np.zeros((Nx,Ny), dtype=np.float64) # solution at t-dt
 u_2 = np.zeros((Nx,Ny), dtype=np.float64) # solution at t-2*dt
 
 ## Generation of the initial random noise
-
-np.random.seed(n_c)
+seed = 2
+np.random.seed(seed)
 
 lamb_pref = (eps/(sig*xmax))*np.sqrt(3/np.pi) #IC prefactor
 
@@ -162,7 +168,7 @@ print('var= ',np.var(noise))
 
 ## Definition of initial state
 
-ini = 'speckle'
+
 u_1_in = imbalance + noise
 
 
@@ -181,8 +187,8 @@ path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
 #path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
 # path = ''
 
-name = 'IC_test_opti'
-file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={correlation_scale}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}"
+name = 'Coarsening'
+file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Sig={sig}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}_usave={t_u_save}_g1save={t_g1_save}_seed={seed}"
 file_copy = file_name + '_copy'
 
 i = 0
@@ -197,10 +203,6 @@ try :
         os.remove(path + name + file_name + '.nc')
     with nc.Dataset(path + name + file_name + '.nc', 'w',format = 'NETCDF4_CLASSIC') as ds:
 
-# try: ncfile.close()  # just to be safe, make sure dataset is not already open.
-# except: pass
-# ncfile = Dataset(path + name + file_name + '.nc',mode='w',format='NETCDF4_CLASSIC') #file creation
-# #This saving system has the advantage of not having to rewrite the whole file each time it is updated (time consuming)
 
         time_dim = ds.createDimension('t_arr', int(Nt/int_phi2_save)+1)     
         phi2_dim = ds.createDimension('varphi', int(Nt/int_phi2_save)+1)   
@@ -223,6 +225,7 @@ try :
             t_i = t_i + dt
             
             if i% int_u_save == 0:
+                j = i//int_u_save
                 print('t = ' + str(round(t_i,3)))
                 phi_2D[j] = u_1 #Save 2D phi
                 phi_2D_1[j] = u_2 #Save 2D phi before
@@ -231,6 +234,7 @@ try :
             if i% int_g1_save == 0:
                 g1_t_avant = ifftshift(g_1_avant_moy(u_1)) #g1 before radial average
                 g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx) 
+                # g1_t_prof = RadialProfile(g1_t_avant,xycen = (Nx//2,Nx//2),min_radius = 0, max_radius = Nx//2, radius_step = 1) 
                 g1_t_apres = g1_t_prof.profile #g1 after radial average for pixel values of xx
                 g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate') #g1 function for real values
                 g1[k] = g1_func(r0) #Save g1
@@ -264,6 +268,6 @@ except Exception as e:
 end = time.time()
 print('Time = ' + str(end -start))
 
-# ncfile.close(); print('Dataset is closed!')
+
 
 
