@@ -23,32 +23,34 @@ from scipy import interpolate
 import os
 import shutil
 from numba import config
+from mpmath import *
+from numpy.polynomial.chebyshev import Chebyshev
 
+n_c = 8 #number of cores for parallelization
 
-# config.NUMBA_NUM_THREADS = 8  # Use 4 threads
+precision = 15
 
-n_c = 10 #number of cores for parallelization
+mp.dps = precision; mp.pretty = True
+one = mpf(1)
 
-tmax = 50 # maximum time
-dt = 10**-5 # time step
+tmax = 15 # maximum time
+dt = 10**-4 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
-C2 = -2.   #  2m(g-g12)rho
+C2 = -1.   #  2m(g-g12)rho
 eps = 0.01   # Amplitude of the initial random field
 
 
 Nexp = 110   # Regularization parameter of the potential. Should be integer
         #A higher value  increases accuracy but makes dynamics less stable
-
-sig = 1 #Physical correlation scale
       
 Nt = int(round(tmax/float(dt)))  # Number of time points
 
 xmax = 75 #Box size along x
 ymax = 75 #Box size along y
-Nx = 800  #number of grid points along x
-Ny = 800   #number of grid points along y. In the present code, Nx should equal Ny.
+Nx = 256  #number of grid points along x
+Ny = 256   #number of grid points along y. In the present code, Nx should equal Ny.
 
 x = np.linspace(0,xmax*(1-1/Nx),Nx) #x grid
 y = np.linspace(0,ymax*(1-1/Nx),Ny) #y grid
@@ -56,7 +58,11 @@ y = np.linspace(0,ymax*(1-1/Nx),Ny) #y grid
 dx = x[1] - x[0]
 dy = y[1] - y[0]
 
-correlation_scale = sig/dx #Correlation scale in pixel units (needed for gaussian_filter function)
+# correlation_scale = sig/dx #Correlation scale in pixel units (needed for gaussian_filter function)
+# correlation_scale = 2
+# sig = correlation_scale*dx
+sig = 1
+correlation_scale = sig/dx
 
 print('sigma_phys = ', sig)
 print('sigma_pix = ', correlation_scale)
@@ -76,15 +82,54 @@ q_2 = Kx**2 + Ky**2
 dt2q2 = q_2*dt2
 
 
+
+def f_precis(x_loc):
+    return acos(x_loc)
+
+order_prec = 8
+taylor_exp = taylor(f_precis, 0, order_prec*2+1)
+p_pa1, q_pa1 = pade(taylor_exp, order_prec, order_prec)
+p_pa = [float(x) for x in p_pa1]
+p_pa = np.array(p_pa)
+q_pa = [float(x) for x in q_pa1]
+q_pa = np.array(q_pa)
+
 @jit(nopython=True, parallel=True)
 def compute_F(u_1_loc):
     u1_loc_2 = u_1_loc**2
     u1_loc_3 = u1_loc_2*u_1_loc
     u1_loc_4 = u1_loc_2**2
-    F = (np.pi/2 - u_1_loc - 81*np.pi*u1_loc_2/238 + 367*u1_loc_3/714 + 183*np.pi*u1_loc_4/9520)/(1 - 81*u1_loc_2/119 + 183*u1_loc_4/4760)
+    u1_loc_5 = u1_loc_4*u_1_loc
+    u1_loc_6 = u1_loc_4*u1_loc_2
+    u1_loc_7 = u1_loc_6*u_1_loc
+    u1_loc_8 = u1_loc_6*u1_loc_2
+    F_num = (p_pa[0] + p_pa[1]*u_1_loc + p_pa[2]*u1_loc_2 + p_pa[3]*u1_loc_3 + p_pa[4]*u1_loc_4 + p_pa[5]*u1_loc_5 + p_pa[6]*u1_loc_6 + p_pa[7]*u1_loc_7 + p_pa[8]*u1_loc_8)
+    F_denom = (q_pa[0] + q_pa[1]*u_1_loc + q_pa[2]*u1_loc_2 + q_pa[3]*u1_loc_3 + q_pa[4]*u1_loc_4 + q_pa[5]*u1_loc_5 + q_pa[6]*u1_loc_6 + q_pa[7]*u1_loc_7 + q_pa[8]*u1_loc_8 )
+    F = F_num/F_denom
     return F
+
+# @jit(nopython=True, parallel=True)
+# def compute_F(u_1_loc):
+#     u1_loc_2 = u_1_loc**2
+#     u1_loc_3 = u1_loc_2*u_1_loc
+#     u1_loc_4 = u1_loc_2**2
+#     F = (np.pi/2 - u_1_loc - 81*np.pi*u1_loc_2/238 + 367*u1_loc_3/714 + 183*np.pi*u1_loc_4/9520)/(1 - 81*u1_loc_2/119 + 183*u1_loc_4/4760)
+#     return F
 #Pade approximation for arccos(phi)
 #Acceleration with jit (power calculations) and parallelization
+
+# x_test = np.linspace(-1,1,1000)
+
+# def arccos_f(x_loc):
+#     return np.arccos(x_loc)
+
+# precision = 8
+# Pm = Chebyshev.fit(x_test,arccos_f(x_test),precision)
+# Qm = Chebyshev.fit(x_test,1+ 0*x_test,precision)
+
+# def F_cheby(tab):
+#     rational_chebyshev = Pm(tab)/Qm(tab)
+#     return rational_chebyshev
 
 @jit(nopython=True, parallel=True)
 def sqrt_NL(u_1_loc):
@@ -100,9 +145,12 @@ def advance_vectorized_step1(u_1_loc):
     u_1_hat = rfft2(u_1_loc, workers = n_c)
     
     F = compute_F(u_1_loc)
+    # F = np.arccos(u_1_loc)
+    # F =  F_cheby(u_1_loc)
     F_hat = rfft2(F, workers = n_c)
     
-    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
+    NL_part = (1/4)*sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
+    # NL_part = (1/4)*(1/np.sqrt(1-u_1_loc**2 + 10**-12))*irfft2(q_2*F_hat, workers = n_c)
     NLpart_hat =  rfft2(NL_part, workers = n_c)
     
     u_hat = (D1*u_1_hat + dt2_prime*q_2*NLpart_hat)/(1 + C2*dt2_prime*q_2) 
@@ -120,9 +168,12 @@ def advance_vectorized(u_1_loc, u_2_loc):
     u_2_hat = rfft2(u_2_loc, workers = n_c)
      
     F = compute_F(u_1_loc)
+    # F = np.arccos(u_1_loc)
+    # F =  F_cheby(u_1_loc)
     F_hat = rfft2(F, workers = n_c)
     
-    NL_part = sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
+    NL_part = (1/4)*sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
+    # NL_part = (1/4)*(1/np.sqrt(1-u_1_loc**2  + 10**-12))*irfft2(q_2*F_hat, workers = n_c)
     NLpart_hat =  rfft2(NL_part, workers = n_c)
     
     u_hat = (D1*u_1_hat - D2*u_2_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2)  
@@ -143,7 +194,7 @@ def g_1_avant_moy(phi_loc):
     return res
 
 t_u_save = 5
-t_g1_save = 2
+t_g1_save = 1
 int_u_save = int(1/dt)*t_u_save
 int_g1_save = int(1/dt)*t_g1_save
 saving = int(1/dt)*5
@@ -159,9 +210,12 @@ seed = 2
 np.random.seed(seed)
 
 lamb_pref = (eps/(sig*xmax))*np.sqrt(3/np.pi) #IC prefactor
+# lamb_pref = (eps/(xmax))*np.sqrt(3/np.pi)
 
 noise = np.random.rand(Nx, Ny)*2 -1
 noise = lamb_pref*gaussian_filter(noise,correlation_scale, mode = 'wrap',truncate = 8.0)*Nx*2*np.pi*sig**2
+
+# noise = lamb_pref*gaussian_filter(noise,correlation_scale, mode = 'wrap',truncate = 8.0)*Nx*2*np.pi
 #IC normalized such that <\phi^2(0)> = eps^2
 
 print('var= ',np.var(noise))
@@ -183,11 +237,11 @@ Cons_N0 = np.sum(u_1)/(Nx)**2 #Initial conservation number
 print('Cons = ', Cons_N0)
 
 
-path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
+path = '/users/jussieu/egliott/Documents/Coarsening/codes/Data_coarsening/'
 #path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
 # path = ''
 
-name = 'Coarsening'
+name = 'Coarsening_pade8'
 file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Sig={sig}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}_usave={t_u_save}_g1save={t_g1_save}_seed={seed}"
 file_copy = file_name + '_copy'
 
@@ -197,6 +251,9 @@ j = 0
 k = 0
 
 start = time.time()
+
+# tolerance = 1e-6
+# adjustment = 1e-6
 
 try :
     if os.path.exists(path + name + file_name + '.nc'):
@@ -224,9 +281,16 @@ try :
         for i in range(Nt):
             t_i = t_i + dt
             
+            # # Replace values close to -1
+            # u_1 = np.where(u_1 < -1 + tolerance, -1 + adjustment, u_1)
+
+            # # Replace values close to 1
+            # u_1 = np.where(u_1 > 1 - tolerance, 1 - adjustment, u_1)
+            
             if i% int_u_save == 0:
                 j = i//int_u_save
                 print('t = ' + str(round(t_i,3)))
+                print(u_1.dtype)
                 phi_2D[j] = u_1 #Save 2D phi
                 phi_2D_1[j] = u_2 #Save 2D phi before
                 j += 1
@@ -245,10 +309,11 @@ try :
                 i_save = i//int_phi2_save
                 t_arr[i_save] = t_i #Save time
                 varphi[i_save] = np.var(u_1) #Save <\phi^2>
+                # print(u_1.dtype)
              
             if i%saving == 0:
                 ds.sync() #Sync values to nc file
-                print(i)
+                # print(i)
                 try: 
                     shutil.copy(path + name + file_name + '.nc', path + name + file_copy + '.nc' )
                     print('copied')
@@ -261,6 +326,8 @@ try :
             
             u = advance_vectorized(u_1, u_2)
             u_2, u_1, u = u_1, u, u_2
+            
+            
             #Advance in ODE
 except Exception as e:
     print('Error',e)          
