@@ -140,8 +140,8 @@ def real(n_i):
     print(Cons_N0)
     
     
-    # path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
-    path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
+    path = '/users/jussieu/egliott/Documents/Coarsening/2D_code/Data_coarsening/'
+    # path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
     
     name = 'short_times'
     file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Initial={ini}_Sig={correlation_scale}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}"
