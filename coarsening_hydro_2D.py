@@ -28,19 +28,13 @@ from numpy.polynomial.chebyshev import Chebyshev
 
 n_c = 8 #number of cores for parallelization
 
-precision = 15
-
-mp.dps = precision; mp.pretty = True
-one = mpf(1)
-
-tmax = 15 # maximum time
-dt = 10**-4 # time step
+tmax = 10 # maximum time
+dt = 5*10**-4 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
 C2 = -1.   #  2m(g-g12)rho
 eps = 0.01   # Amplitude of the initial random field
-
 
 Nexp = 110   # Regularization parameter of the potential. Should be integer
         #A higher value  increases accuracy but makes dynamics less stable
@@ -58,138 +52,164 @@ y = np.linspace(0,ymax*(1-1/Nx),Ny) #y grid
 dx = x[1] - x[0]
 dy = y[1] - y[0]
 
-# correlation_scale = sig/dx #Correlation scale in pixel units (needed for gaussian_filter function)
-# correlation_scale = 2
-# sig = correlation_scale*dx
-sig = 1
-correlation_scale = sig/dx
+
+sig = 1 #Physical dimensionless correlation scale (corresponds to sigma/xi)
+correlation_scale = sig/dx #correlation scale in pixel units
 
 print('sigma_phys = ', sig)
-print('sigma_pix = ', correlation_scale)
 print('dx = ', dx)
 
 
-r0 = np.sqrt(x**2 + y**2)
+r0 = np.sqrt(x**2 + y**2) 
 X, Y = np.meshgrid(x, y, indexing='ij') #2D mesgrid for coordinates x,y
 
-kx = fftfreq(Nx, d = dx)*2.*np.pi 
-ky = rfftfreq(Nx, d = dx)*2.*np.pi
-#1D kx,ky grids in Fourier space
+kx = fftfreq(Nx, d = dx)*2.*np.pi #1D kx grid in Fourier space
+ky = rfftfreq(Nx, d = dx)*2.*np.pi #1D ky grid in Fourier space
 Kx, Ky = np.meshgrid(kx, ky, indexing='ij') #2D meshgrid in Fourier space
 
 q_2 = Kx**2 + Ky**2
-
 dt2q2 = q_2*dt2
 
 
+precision = 15
+mp.dps = precision; mp.pretty = True
+one = mpf(1)
 
 def f_precis(x_loc):
     return acos(x_loc)
 
-order_prec = 8
-taylor_exp = taylor(f_precis, 0, order_prec*2+1)
-p_pa1, q_pa1 = pade(taylor_exp, order_prec, order_prec)
+order_prec = 4 #Order of the Padé approximation for arccos(phi)
+taylor_exp = taylor(f_precis, 0, order_prec*2+1) 
+p_pa1, q_pa1 = pade(taylor_exp, order_prec, order_prec) 
 p_pa = [float(x) for x in p_pa1]
-p_pa = np.array(p_pa)
+p_pa = np.array(p_pa) #Padé coefficients for the numerator 
 q_pa = [float(x) for x in q_pa1]
-q_pa = np.array(q_pa)
+q_pa = np.array(q_pa) #Padé coefficients for the denominator 
 
 @jit(nopython=True, parallel=True)
 def compute_F(u_1_loc):
+    '''
+    Parameters
+    ----------
+    u_1_loc : 2D array
+
+    Returns
+    -------
+    F : 2D array
+    Pade approximation for arccos(phi)
+
+    '''
     u1_loc_2 = u_1_loc**2
     u1_loc_3 = u1_loc_2*u_1_loc
     u1_loc_4 = u1_loc_2**2
-    u1_loc_5 = u1_loc_4*u_1_loc
-    u1_loc_6 = u1_loc_4*u1_loc_2
-    u1_loc_7 = u1_loc_6*u_1_loc
-    u1_loc_8 = u1_loc_6*u1_loc_2
-    F_num = (p_pa[0] + p_pa[1]*u_1_loc + p_pa[2]*u1_loc_2 + p_pa[3]*u1_loc_3 + p_pa[4]*u1_loc_4 + p_pa[5]*u1_loc_5 + p_pa[6]*u1_loc_6 + p_pa[7]*u1_loc_7 + p_pa[8]*u1_loc_8)
-    F_denom = (q_pa[0] + q_pa[1]*u_1_loc + q_pa[2]*u1_loc_2 + q_pa[3]*u1_loc_3 + q_pa[4]*u1_loc_4 + q_pa[5]*u1_loc_5 + q_pa[6]*u1_loc_6 + q_pa[7]*u1_loc_7 + q_pa[8]*u1_loc_8 )
+    F_num = (p_pa[0] + p_pa[1]*u_1_loc + p_pa[2]*u1_loc_2 + p_pa[3]*u1_loc_3 + p_pa[4]*u1_loc_4 )
+    F_denom = (q_pa[0] + q_pa[1]*u_1_loc + q_pa[2]*u1_loc_2 + q_pa[3]*u1_loc_3 + q_pa[4]*u1_loc_4 )
     F = F_num/F_denom
     return F
 
-# @jit(nopython=True, parallel=True)
-# def compute_F(u_1_loc):
-#     u1_loc_2 = u_1_loc**2
-#     u1_loc_3 = u1_loc_2*u_1_loc
-#     u1_loc_4 = u1_loc_2**2
-#     F = (np.pi/2 - u_1_loc - 81*np.pi*u1_loc_2/238 + 367*u1_loc_3/714 + 183*np.pi*u1_loc_4/9520)/(1 - 81*u1_loc_2/119 + 183*u1_loc_4/4760)
-#     return F
-#Pade approximation for arccos(phi)
-#Acceleration with jit (power calculations) and parallelization
-
-# x_test = np.linspace(-1,1,1000)
-
-# def arccos_f(x_loc):
-#     return np.arccos(x_loc)
-
-# precision = 8
-# Pm = Chebyshev.fit(x_test,arccos_f(x_test),precision)
-# Qm = Chebyshev.fit(x_test,1+ 0*x_test,precision)
-
-# def F_cheby(tab):
-#     rational_chebyshev = Pm(tab)/Qm(tab)
-#     return rational_chebyshev
-
 @jit(nopython=True, parallel=True)
 def sqrt_NL(u_1_loc):
+    '''
+
+    Parameters
+    ----------
+    u_1_loc : 2D array
+
+    Returns
+    -------
+    2D array
+    Sqrt of 1/(1-phi^2) regularized to avoid divergence
+
+    '''
     u1_loc_2 = u_1_loc**2 
     return np.sqrt((1 - u_1_loc**(2 + 2*Nexp))/(1 - u1_loc_2))
-#Sqrt part of the nonlinear part
-#Acceleration with jit (power calculations) and parallelization
 
-def advance_vectorized_step1(u_1_loc):
+
+def advance_vectorized_step1(u_1_loc_hat):
+    '''
+    Pseudo spectral method with an implicit time integration
+
+    Parameters
+    ----------
+    u_1_loc_hat : 2D array
+    Fourier transform of initial distribution phi(0)
+
+    Returns
+    -------
+    u_hat : 2D array
+    Fourier transform of the result phi(dt) after the first step of the ode
+
+    '''
     D1 = 1
     dt2_prime = 0.5*dt2 #For the first time step, we take 1/2 of dt2
     
-    u_1_hat = rfft2(u_1_loc, workers = n_c)
+    u_1_loc = irfft2(u_1_loc_hat, workers = n_c)
     
     F = compute_F(u_1_loc)
-    # F = np.arccos(u_1_loc)
-    # F =  F_cheby(u_1_loc)
     F_hat = rfft2(F, workers = n_c)
     
     NL_part = (1/4)*sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
-    # NL_part = (1/4)*(1/np.sqrt(1-u_1_loc**2 + 10**-12))*irfft2(q_2*F_hat, workers = n_c)
     NLpart_hat =  rfft2(NL_part, workers = n_c)
-    
-    u_hat = (D1*u_1_hat + dt2_prime*q_2*NLpart_hat)/(1 + C2*dt2_prime*q_2) 
-    u = irfft2(u_hat, workers = n_c)
-    
-    return u
-#Function used to calculate the the first step of the ode (see notes)
-#Takes u(0) and gives u(dt)
 
-def advance_vectorized(u_1_loc, u_2_loc):
+    
+    u_hat = (D1*u_1_loc_hat + dt2_prime*q_2*NLpart_hat)/(1 + C2*dt2_prime*q_2) 
+    
+    return u_hat
+
+
+
+def advance_vectorized(u_1_loc_hat, u_2_loc_hat):
+    '''
+    Pseudo spectral method with an implicit time integration
+    
+    Parameters
+    ----------
+    u_1_loc_hat : 2D array
+        Fourier transform of phi(t-dt)
+    u_2_loc_hat : 2D array
+        Fourier transform of phi(t-2dt)
+
+    Returns
+    -------
+    u_hat : 2D array
+        Fourier transform of phi(t)
+
+    '''
     D1 = 2.
     D2 = 1.
     
-    u_1_hat = rfft2(u_1_loc, workers = n_c)
-    u_2_hat = rfft2(u_2_loc, workers = n_c)
+    u_1_loc = irfft2(u_1_loc_hat, workers = n_c)
      
     F = compute_F(u_1_loc)
-    # F = np.arccos(u_1_loc)
-    # F =  F_cheby(u_1_loc)
     F_hat = rfft2(F, workers = n_c)
-    
+
     NL_part = (1/4)*sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
-    # NL_part = (1/4)*(1/np.sqrt(1-u_1_loc**2  + 10**-12))*irfft2(q_2*F_hat, workers = n_c)
+
     NLpart_hat =  rfft2(NL_part, workers = n_c)
     
-    u_hat = (D1*u_1_hat - D2*u_2_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2)  
-    u = irfft2(u_hat, workers = n_c)
-    
-    return u
-#Function used to solve the ode(see notes)
-#Takes u(t - dt) and u(t - 2dt) and returns u(t)
-#Pseudo spectral method with an implicit time integration
+    u_hat = (D1*u_1_loc_hat - D2*u_2_loc_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2) 
+
+    return u_hat
 
 
 xx = np.arange(0,Nx//2,1) #Pixel grid used to calculate g1
 
-def g_1_avant_moy(phi_loc):
-    phi_hat = rfft2(phi_loc)
-    fourier = phi_hat*np.conjugate(phi_hat)
+def g_1_avant_moy(phi_loc_hat):
+    '''
+    Calculate correlation function using the Wiener Khinchin theorem
+
+    Parameters
+    ----------
+    phi_loc_hat : 2D array
+        Fourier transform of phi(t)
+
+    Returns
+    -------
+    res : 2D array
+        2D correlation function before averaging in space
+
+    '''
+    fourier = phi_loc_hat*np.conjugate(phi_loc_hat)
     res = irfft2(fourier).real
     return res
 
@@ -199,49 +219,46 @@ int_u_save = int(1/dt)*t_u_save
 int_g1_save = int(1/dt)*t_g1_save
 saving = int(1/dt)*5
 int_phi2_save = int(0.05/dt)
-#Choice of when to save certain variables
+#Choice of when to save different variables
 
 u = np.zeros((Nx,Ny), dtype=np.float64) # solution array
 u_1 = np.zeros((Nx,Ny), dtype=np.float64) # solution at t-dt
 u_2 = np.zeros((Nx,Ny), dtype=np.float64) # solution at t-2*dt
+
+u_hat = rfft2(u, workers = n_c)
+u_1_hat = rfft2(u_1, workers = n_c)
+u_2_hat = rfft2(u_2, workers = n_c)
+
 
 ## Generation of the initial random noise
 seed = 2
 np.random.seed(seed)
 
 lamb_pref = (eps/(sig*xmax))*np.sqrt(3/np.pi) #IC prefactor
-# lamb_pref = (eps/(xmax))*np.sqrt(3/np.pi)
 
-noise = np.random.rand(Nx, Ny)*2 -1
-noise = lamb_pref*gaussian_filter(noise,correlation_scale, mode = 'wrap',truncate = 8.0)*Nx*2*np.pi*sig**2
-
-# noise = lamb_pref*gaussian_filter(noise,correlation_scale, mode = 'wrap',truncate = 8.0)*Nx*2*np.pi
+noise = np.random.rand(Nx, Ny)*2 -1 #Uniform distribution between [-1,1]
+noise = lamb_pref*gaussian_filter(noise,correlation_scale, mode = 'wrap',truncate = 8.0)*Nx*2*np.pi*sig**2 
 #IC normalized such that <\phi^2(0)> = eps^2
 
-print('var= ',np.var(noise))
+print('var= ',np.var(noise)) #Should be equal to eps^2
 
 ## Definition of initial state
-
-
 u_1_in = imbalance + noise
-
-
 u_1 = u_1_in
+u_1_hat = rfft2(u_1, workers = n_c)
 
-## Special formula for first time step
-u = advance_vectorized_step1(u_1)
-u_2, u_1, u = u_1, u, u_2
+u_hat = advance_vectorized_step1(u_1_hat) ## Special formula for first time step
+u_2_hat, u_1_hat, u_hat = u_1_hat, u_hat, u_2_hat #Update arrays
 
-
-Cons_N0 = np.sum(u_1)/(Nx)**2 #Initial conservation number
-print('Cons = ', Cons_N0)
+Cons_N0 = np.sum(u_1)/(Nx)**2 #Initial total population 
+print('Cons = ', Cons_N0) #Should be conserved and equal to imbalance
 
 
 path = '/users/jussieu/egliott/Documents/Coarsening/codes/Data_coarsening/'
 #path = 'C:\\Users\\elyse\\Documents\\Data_coarsening\\'
 # path = ''
 
-name = 'Coarsening_pade8'
+name = 'Coarsening_test'
 file_name = f"_dt={dt}_Tmax={tmax}_Nx={Nx}_Xmax={xmax}_Sig={sig}_Imb={imbalance}_Eps={eps}_C={C2}_Nexp={Nexp}_usave={t_u_save}_g1save={t_g1_save}_seed={seed}"
 file_copy = file_name + '_copy'
 
@@ -252,8 +269,6 @@ k = 0
 
 start = time.time()
 
-# tolerance = 1e-6
-# adjustment = 1e-6
 
 try :
     if os.path.exists(path + name + file_name + '.nc'):
@@ -268,8 +283,6 @@ try :
         phi_time_dim = ds.createDimension('phi_time', int(Nt/int_u_save) + 1 )  
         phi_x_value_dim = ds.createDimension('phi_x_value', Nx )  
         phi_y_value_dim = ds.createDimension('phi_y_value', Ny )
-       
-        
         #Set file dimensions
         t_arr = ds.createVariable('t_arr', np.float32, ('t_arr',))
         varphi = ds.createVariable('varphi', np.float32, ('varphi',))
@@ -280,24 +293,18 @@ try :
 
         for i in range(Nt):
             t_i = t_i + dt
-            
-            # # Replace values close to -1
-            # u_1 = np.where(u_1 < -1 + tolerance, -1 + adjustment, u_1)
 
-            # # Replace values close to 1
-            # u_1 = np.where(u_1 > 1 - tolerance, 1 - adjustment, u_1)
-            
             if i% int_u_save == 0:
                 j = i//int_u_save
                 print('t = ' + str(round(t_i,3)))
-                print(u_1.dtype)
-                phi_2D[j] = u_1 #Save 2D phi
-                phi_2D_1[j] = u_2 #Save 2D phi before
+             
+                phi_2D[j] = irfft2(u_1_hat,workers = n_c) #Save 2D phi
+                phi_2D_1[j] = irfft2(u_2_hat,workers = n_c) #Save 2D phi before
                 j += 1
                 
             if i% int_g1_save == 0:
-                g1_t_avant = ifftshift(g_1_avant_moy(u_1)) #g1 before radial average
-                g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx) 
+                g1_t_avant = ifftshift(g_1_avant_moy(u_1_hat)) #g1 before radial average
+                g1_t_prof = RadialProfile(g1_t_avant,(Nx//2,Nx//2),xx) #Calculate radial profile of g1
                 # g1_t_prof = RadialProfile(g1_t_avant,xycen = (Nx//2,Nx//2),min_radius = 0, max_radius = Nx//2, radius_step = 1) 
                 g1_t_apres = g1_t_prof.profile #g1 after radial average for pixel values of xx
                 g1_func = interpolate.interp1d(g1_t_prof.radius*dx,g1_t_apres, fill_value = 'extrapolate') #g1 function for real values
@@ -305,17 +312,17 @@ try :
                 k += 1
             
             if i%int_phi2_save == 0:
-                Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0 #Check conservation of N
+                u_1 = irfft2(u_1_hat,workers = n_c) 
+                Cons_N = (Cons_N0 - np.sum(u_1)/(Nx)**2)/Cons_N0 #Check conservation of total population
                 i_save = i//int_phi2_save
-                t_arr[i_save] = t_i #Save time
+                t_arr[i_save] = t_i #Save time for variance
                 varphi[i_save] = np.var(u_1) #Save <\phi^2>
-                # print(u_1.dtype)
              
             if i%saving == 0:
                 ds.sync() #Sync values to nc file
-                # print(i)
+                
                 try: 
-                    shutil.copy(path + name + file_name + '.nc', path + name + file_copy + '.nc' )
+                    shutil.copy(path + name + file_name + '.nc', path + name + file_copy + '.nc' ) #Makes a copy of the file to avoid file corruption when reading
                     print('copied')
                 except IOError as e:
                     print(f'{e}')
@@ -324,11 +331,10 @@ try :
                 print("nan found") #Usually this means that the code is unstable, try with smaller timestep
                 break
             
-            u = advance_vectorized(u_1, u_2)
-            u_2, u_1, u = u_1, u, u_2
-            
-            
+            u_hat = advance_vectorized(u_1_hat, u_2_hat)
+            u_2_hat, u_1_hat, u_hat = u_1_hat, u_hat, u_2_hat
             #Advance in ODE
+            
 except Exception as e:
     print('Error',e)          
 
