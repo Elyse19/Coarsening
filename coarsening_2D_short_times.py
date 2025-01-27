@@ -22,8 +22,8 @@ from scipy import interpolate
 start = time.time()
 n_c = 0
 
-tmax = 10 #maximum time
-dt = 10**-4 # time step
+tmax = 7 #maximum time
+dt = 10**-3 # time step
 dt2 = dt**2
 
 imbalance = 0.0 #-0.4 # initial imbalance between the two species (0 = balanced mixture)
@@ -59,27 +59,37 @@ dy = y[1] - y[0]
 kx = ky = np.fft.fftfreq(Nx, d = dx)*2.*np.pi
 Kx, Ky = np.meshgrid(kx, ky, indexing='ij')
 
+q_2 = Kx**2 + Ky**2
+
+def f_adv(u_loc):
+    return q_2*(u_loc - (1/4)*q_2*u_loc)
 
 
-def advance_vectorized(u, u_1, u_2, u_hat, u_1_hat, u_2_hat, dt2, step1=False):
+
+def advance_vectorized(u_1,u_2,step1=False):
+    
+    u_1_hat = fft2(u_1)
+    # v_1_hat = fft2(v_1)
+    u_2_hat = fft2(u_2)
+        
+    # q_2 = Kx**2 + Ky**2
     
     if step1:
-        dt2 = 0.5*dt2  # redefine for the first time step
-        D1 = 1.
-        D2 = 0
+        u_hat = u_1_hat + 0.5*dt2*q_2*(u_1_hat - (1/4)*q_2*u_1_hat)
+    # u_hat[:] = D1*u_1_hat - D2*u_2_hat + dt2*q_2*(u_1_hat - (1/4)*q_2*u_1_hat)
     else:
-        D1 = 2.
-        D2 = 1.
+        # u_hat = u_1_hat + dt*v_1_hat
+        u_hat = 2*u_1_hat - u_2_hat + dt2*q_2*(u_1_hat - (1/4)*q_2*u_1_hat)
+    # k1 = f_adv(u_1_hat)
+    # k2 = f_adv(u_1_hat + dt*k1/2)
+    # k3 = f_adv(u_1_hat + dt*k2/2)
+    # k4 = f_adv(u_1_hat + dt*k3)
     
-    u_1_hat[:] = fft2(u_1)
-    u_2_hat[:] = fft2(u_2)
-        
-    q_2 = Kx**2 + Ky**2
-    
-    u_hat[:] = D1*u_1_hat - D2*u_2_hat + dt2*q_2*(u_1_hat - (1/4)*q_2*u_1_hat)
-    # u_hat[:] = D1*u_1_hat - D2*u_2_hat + dt2*q_2*(C2*u_1 - q_2*u_1)
-    
-    u[:] = ifft2(u_hat).real
+    # v_hat = v_1_hat + (dt/6)*(k1 + 2*k2 + 2*k3 + k4)
+    # v_hat = np.exp(dt*q_2*(1 - (1/4)*q_2))*u_1_hat
+
+    u = ifft2(u_hat).real
+    # v = ifft2(v_hat).real
 
     return u
 
@@ -102,6 +112,8 @@ saving = int(0.1/dt)
 u = np.zeros((Nx,Ny), dtype=np.float64) # solution array
 u_1 = np.zeros((Nx,Ny), dtype=np.float64) # solution at t-dt
 u_2 = np.zeros((Nx,Ny), dtype=np.float64) # solution at t-2*dt
+u_3 = np.zeros((Nx,Ny), dtype=np.float64) # solution at t-2*dt
+
 
 u_hat = np.zeros((Nx,Ny), dtype=np.complex128)
 u_1_hat = np.zeros((Nx,Ny), dtype=np.complex128)
@@ -124,12 +136,14 @@ u_1_in = imbalance + noise
 
 
 u_1 = u_1_in
+v_1 = 0*u_1_in
 
 u_1_in_hat = fft2(u_1_in)
 
 
 n = 0 # Special formula for first time step
-u = advance_vectorized(u, u_1, u_2, u_hat, u_1_hat, u_2_hat, dt2, step1=True)
+u = advance_vectorized(u_1,v_1,step1=True)
+# u_1, v_1 = u, v
 u_2, u_1, u = u_1, u, u_2
 
 u_arr = np.zeros((int(Nt/int_save)+1,Nx,Ny))
@@ -188,7 +202,8 @@ for i in range(Nt):
     # if np.max(u_1)>1:
     #     print("max")
     #     break
-    u = advance_vectorized(u, u_1, u_2, u_hat, u_1_hat, u_2_hat, dt2)
+    u = advance_vectorized(u_1,u_2)
+    # u_1,v_1 = u, v
     u_2, u_1, u = u_1, u, u_2
       
 
