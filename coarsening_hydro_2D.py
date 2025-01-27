@@ -184,7 +184,6 @@ def advance_vectorized(u_1_loc_hat, u_2_loc_hat):
     F_hat = rfft2(F, workers = n_c)
 
     NL_part = (1/4)*sqrt_NL(u_1_loc)*irfft2(q_2*F_hat, workers = n_c)
-
     NLpart_hat =  rfft2(NL_part, workers = n_c)
     
     u_hat = (D1*u_1_loc_hat - D2*u_2_loc_hat + dt2q2*NLpart_hat)/(1 + C2*dt2q2) 
